@@ -74,4 +74,4 @@ The SLO is defined before there is anything to measure. The probe described abov
 
 The 1-day backup window is acceptable here for two reasons. NO₂ history can be re-fetched from Luchtmeetnet for any period, so an old database backup protects nothing that the source does not already keep. Traffic history lives in S3, not in the database, so RDS backups do not cover it either way. What the short window does not cover is a mistake inside the database, such as a wrong `DELETE`, noticed more than a day later; manual snapshots before risky changes close most of that gap. On a paid account the retention would be 7 days, which is still free up to 20 GB.
 
-The rebuild runbook is not written yet.
+The rebuild procedure is written down in the [rebuild runbook](../runbook-rebuild.md). It has not been run end to end yet, so the one-hour RTO is still an estimate.

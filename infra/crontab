@@ -1,0 +1,5 @@
+# AirBreda hourly ingestion (logs are JSON lines)
+# NDW at :00; Luchtmeetnet at :15 because the hourly NO2 value is published with a short delay
+# (each run re-fetches ~50h, so a late value is picked up by the next run anyway).
+0 * * * * /usr/bin/docker run --rm --env-file /home/ec2-user/airbreda/.env airbreda-traffic >> /home/ec2-user/airbreda/logs/traffic.log 2>&1
+15 * * * * /usr/bin/docker run --rm --env-file /home/ec2-user/airbreda/.env airbreda-air >> /home/ec2-user/airbreda/logs/air.log 2>&1

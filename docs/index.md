@@ -54,6 +54,8 @@ Trust boundaries: the database accepts connections only from the VM's security g
 | ADR-005 | Compute & Deployment Strategy |
 | ADR-006 | ML Serving Architecture |
 
+Operations: [rebuild runbook](runbook-rebuild.md) (recovery procedure for ADR-003).
+
 ## 3. Trade-off justifications
 ## 4. Cloud provider rationale (municipal audience)
 ## 5. Cost estimate
