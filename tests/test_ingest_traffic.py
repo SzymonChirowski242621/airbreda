@@ -18,7 +18,7 @@ def test_summarise_site_excludes_and_counts_negative_speed():
         {"index": "4", "value": "-1", "timestamp": TS},
         {"index": "5", "value": "60", "timestamp": TS},  # per-class flow, not a total
     ]
-    row = summarise_site("hrr", "SITE", INDEX_MAP, readings)
+    row, _ = summarise_site("hrr", "SITE", INDEX_MAP, readings)
     assert row["intensity_veh_per_hr"] == 1440
     assert row["avg_speed_kmh"] == 98
     assert row["bad_value_count"] == 1

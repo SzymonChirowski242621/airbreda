@@ -40,6 +40,9 @@ from reference.getTrafficReadings import (
     download_and_decompress,
     extract_measurements,
 )
+import status
+
+SOURCE = "NDW"
 
 SITES = {
     "hrl": "RWS01_MONIBAS_0271hrl0063ra",  # A27 mainline, direction 1
@@ -56,34 +59,41 @@ log = logging.getLogger("ingest_traffic")
 for noisy in ("boto3", "botocore", "s3transfer", "urllib3"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 
+ndw_bad_data_count = 0  # bad values seen in this run (persisted in data_quality_events)
+
 
 def log_event(level: int, event: str, **fields) -> None:
     """Emit one structured JSON log line."""
     log.log(level, json.dumps({"event": event, "source": "NDW", **fields}, default=str))
 
 
-def summarise_site(label: str, site_id: str, index_map: dict, readings: list[dict]) -> dict:
-    """Collapse per-lane readings into one row: total intensity and average speed.
+def summarise_site(label: str, site_id: str, index_map: dict,
+                   readings: list[dict]) -> tuple[dict, list[dict]]:
+    """Collapse per-lane readings into one row (total intensity, average speed) + bad events.
 
-    NDW uses -1 as a sentinel for "no valid measurement". Those values are excluded from
-    the totals, logged as DATA_QUALITY_ERROR and counted, instead of being silently dropped
-    (the reference script's `> 0` filter hides them).
+    NDW uses -1 as a sentinel for "no valid measurement". Those values are never stored:
+    they are left out of the totals written to the CSV, logged as DATA_QUALITY_ERROR,
+    counted in ndw_bad_data_count and returned as events for data_quality_events. (The
+    reference script's `> 0` filter drops them silently, which hides the problem.)
     """
+    global ndw_bad_data_count
     flow_idx = {i for i, m in index_map.items()
                 if m["type"] == "trafficFlow" and m["vehicle"] == "anyVehicle"}
     speed_idx = {i for i, m in index_map.items()
                  if m["type"] == "trafficSpeed" and m["vehicle"] == "anyVehicle"}
 
-    flows, speeds, bad = [], [], 0
+    flows, speeds, events = [], [], []
     for r in readings:
         field = "flow" if r["index"] in flow_idx else "speed" if r["index"] in speed_idx else None
         if field is None:
             continue
         value = float(r["value"])
         if value < 0:
-            bad += 1
             log_event(logging.WARNING, "DATA_QUALITY_ERROR", location=site_id, site=label,
                       field=field, value=value, timestamp=r.get("timestamp"))
+            ndw_bad_data_count += 1
+            events.append({"location": site_id, "field": field, "value": value,
+                           "reason": "sentinel_-1", "timestamp": r.get("timestamp")})
             continue
         (flows if field == "flow" else speeds).append(value)
 
@@ -95,8 +105,8 @@ def summarise_site(label: str, site_id: str, index_map: dict, readings: list[dic
         "intensity_veh_per_hr": sum(flows) if flows else None,
         "avg_speed_kmh": round(sum(moving) / len(moving), 1) if moving else None,
         "lanes": len(flow_idx),
-        "bad_value_count": bad,
-    }
+        "bad_value_count": len(events),
+    }, events
 
 
 def object_key(row: dict) -> str:
@@ -126,18 +136,27 @@ def main() -> int:
     out_dir = Path(os.environ.get("OUTPUT_DIR", "ndw"))
     bucket = os.environ.get("S3_BUCKET")
 
+    use_db = bool(os.environ.get("DB_HOST"))
+
     try:
         config_bytes = download_and_decompress(CONFIG_URL).read()
         measured_bytes = download_and_decompress(MEASURED_URL).read()
     except Exception as exc:
         log_event(logging.ERROR, "fetch_failed", error=str(exc))
+        if use_db:
+            try:
+                with status.connect() as conn:
+                    status.record_error(conn, SOURCE, str(exc))
+            except Exception as db_exc:
+                log_event(logging.ERROR, "status_write_failed", error=str(db_exc))
         return 1
 
-    saved = 0
+    saved, latest_ts, all_events = 0, None, []
     for label, site_id in SITES.items():
         index_map = build_index_map(io.BytesIO(config_bytes), site_id)
         readings = extract_measurements(io.BytesIO(measured_bytes), site_id)
-        row = summarise_site(label, site_id, index_map, readings)
+        row, events = summarise_site(label, site_id, index_map, readings)
+        all_events += events
         if row["timestamp"] is None:
             log_event(logging.WARNING, "no_data", location=site_id, site=label)
             continue
@@ -154,7 +173,23 @@ def main() -> int:
                   uploaded=bool(bucket), intensity_veh_per_hr=row["intensity_veh_per_hr"],
                   avg_speed_kmh=row["avg_speed_kmh"], timestamp=row["timestamp"])
         saved += 1
+        latest_ts = row["timestamp"]
 
+    if use_db:
+        try:
+            conn = status.connect()
+            with conn:
+                status.record_bad_data(conn, SOURCE, all_events)
+                if saved:
+                    status.record_success(conn, SOURCE, latest_ts)
+                alert_count = status.check_threshold(conn, SOURCE)
+            conn.close()
+            if alert_count is not None:
+                log_event(logging.ERROR, "BAD_DATA_THRESHOLD_EXCEEDED", count=alert_count)
+        except Exception as exc:
+            log_event(logging.ERROR, "status_write_failed", error=str(exc))
+
+    log_event(logging.INFO, "run_complete", sites_saved=saved, bad_data_count=ndw_bad_data_count)
     return 0 if saved else 1
 
 

@@ -26,7 +26,7 @@ The `is_flagged` column exists from the start, because Day 2 flags stale or null
 
 NDW traffic goes into S3 (`airbreda-raw-701621783246`) as one small CSV per site per hour, under `ndw/YYYY-MM-DD/HH-{site}.csv`. The date and hour come from the measurement timestamp in the data, not from the clock of the machine that ran the job.
 
-Duplicates are handled by making every write idempotent rather than by trying to deliver each reading exactly once. Each air-quality run re-fetches the last 50 hours and inserts with `ON CONFLICT (station_id, timestamp, component) DO NOTHING`, so a repeated run adds nothing and a missed run is repaired by the next one. In S3 the object key is deterministic per site and hour, so re-running the traffic job overwrites the same object instead of creating a second one. This is at-least-once delivery with idempotent writes.
+Duplicates are handled by making every write idempotent rather than by trying to deliver each reading exactly once. Each air-quality run re-fetches the last 50 hours and inserts with `ON CONFLICT (station_id, timestamp, component) DO UPDATE SET is_flagged = EXCLUDED.is_flagged`. A repeated run adds no rows and a missed run is repaired by the next one. The stored value never changes; only the flag can, because a reading only becomes "stale" once the later hours arrive and show the same value. The script writes only rows that are new or whose flag changed, so repeated runs do not re-log or re-count the same bad reading. In S3 the object key is deterministic per site and hour, so re-running the traffic job overwrites the same object instead of creating a second one. This is at-least-once delivery with idempotent writes.
 
 ## Alternatives considered
 
@@ -40,7 +40,7 @@ The bucket is the only copy of historical traffic, so it has to be treated as th
 
 The CSVs hold the per-site summary (total intensity, average speed, lane count, number of bad values), not the raw XML. That keeps storage tiny: the national measurement file is about 1.2 MB compressed per download, plus 2 MB for the site configuration, while the four CSVs together are under 1 KB. But if the parsing logic turns out to be wrong, past hours cannot be re-parsed. Keeping the raw XML for the four sites would remove that risk and is a cheap change if it becomes necessary.
 
-`DO NOTHING` keeps the first value it sees. RIVM validates measurements after publication, so a value can change later, and with this rule a corrected value would never overwrite the original. If that matters for the model, the fix is `ON CONFLICT ... DO UPDATE SET value = EXCLUDED.value`.
+The upsert keeps the first value it sees. RIVM validates measurements after publication, so a value can change later, and with this rule a corrected value would never overwrite the original. If that matters for the model, the fix is to add `value = EXCLUDED.value` to the update.
 
 The database is not publicly accessible. Only the VM's security group can reach port 5432, so querying it means connecting through the VM. That is less convenient during development, and it is the reason the database has no internet-facing attack surface.
 
