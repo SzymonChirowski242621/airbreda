@@ -23,3 +23,13 @@ def test_to_dataframe_maps_api_records_to_table_shape():
     assert list(df.columns) == ["station_id", "timestamp", "component", "value"]
     assert (df["station_id"] == "NL10240").all()
     assert df["value"].isnull().sum() == 1
+
+
+def test_to_messages_matches_queue_message_shape():
+    from ingest_air import flag_readings, to_messages
+
+    df = flag_readings(to_dataframe([
+        {"formula": "NO2", "value": 18.4, "timestamp_measured": "2024-01-15T08:00:00+00:00"},
+    ]))
+    assert to_messages(df) == [{"station_id": "NL10240", "timestamp": "2024-01-15T08:00:00+00:00",
+                                "component": "NO2", "value": 18.4, "is_flagged": False}]

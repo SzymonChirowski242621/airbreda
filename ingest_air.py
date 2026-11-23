@@ -37,8 +37,15 @@ from datetime import timedelta
 import pandas as pd
 import requests
 
+import broker
 import status
 
+# Polling interval: hourly (cron at :15).
+# Luchtmeetnet publishes one NO2 value per hour, so polling every minute would fetch the same
+# 50 rows 60 times an hour for at most one new value. It stays inside the fair-use limit
+# (100 requests / 5 minutes) but wastes 59 of every 60 requests, and with the Redis queue
+# enabled it would push 59 duplicate copies of each reading for consumers to discard.
+# Hourly is the source's own resolution, and the 50-hour window repairs any missed run.
 SOURCE = "Luchtmeetnet"
 STATION = "NL10240"
 FORMULA = "NO2"
@@ -178,6 +185,25 @@ def log_flagged(df: pd.DataFrame) -> list[dict]:
     return events
 
 
+def to_messages(df: pd.DataFrame) -> list[dict]:
+    """One queue message per reading, in the Day 2 message shape."""
+    return [{"station_id": r.station_id, "timestamp": r.timestamp.isoformat(),
+             "component": r.component, "value": None if pd.isna(r.value) else float(r.value),
+             "is_flagged": bool(r.is_flagged)}
+            for r in df.itertuples(index=False)]
+
+
+def publish_readings(df: pd.DataFrame) -> None:
+    if not broker.enabled():
+        return
+    try:
+        length = broker.publish(to_messages(df))
+        log_event(logging.INFO, "queue_publish_success", queue=broker.QUEUE, published=len(df),
+                  queue_length=length)
+    except Exception as exc:  # the broker is optional; never fail ingestion because of it
+        log_event(logging.ERROR, "queue_publish_failed", queue=broker.QUEUE, error=str(exc))
+
+
 def main() -> int:
     use_db = bool(os.environ.get("DB_HOST"))
 
@@ -205,6 +231,7 @@ def main() -> int:
 
     if not use_db:
         log_flagged(df)
+        publish_readings(df)
         log_event(logging.INFO, "db_skipped", reason="DB_HOST not set")
         return 0
 
@@ -224,6 +251,7 @@ def main() -> int:
 
     log_event(logging.INFO, "db_write_success", rows_fetched=len(df), rows_written=written,
               bad_data_count=luchtmeetnet_bad_data_count)
+    publish_readings(changed)  # only new or re-flagged rows, so the queue gets no repeats
     if alert_count is not None:
         log_event(logging.ERROR, "BAD_DATA_THRESHOLD_EXCEEDED", count=alert_count)
     return 0

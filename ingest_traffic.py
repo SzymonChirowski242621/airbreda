@@ -40,8 +40,16 @@ from reference.getTrafficReadings import (
     download_and_decompress,
     extract_measurements,
 )
+import broker
 import status
 
+# Polling interval: hourly (cron at :00).
+# NDW refreshes its feed every minute, so per-minute polling is possible in principle, but at
+# this design it would break: one run downloads ~3.2 MB and spends 40-60 s of CPU parsing
+# the national XML once per site, so runs would start overlapping, and a burstable t3
+# instance would burn through its CPU credits within hours. It would also mean ~4.6 GB of
+# downloads a day and 5,760 S3 objects a day instead of 96. The model works on hourly NO2,
+# so one traffic snapshot per hour matches the resolution of the target it is joined to.
 SOURCE = "NDW"
 
 SITES = {
@@ -151,7 +159,7 @@ def main() -> int:
                 log_event(logging.ERROR, "status_write_failed", error=str(db_exc))
         return 1
 
-    saved, latest_ts, all_events = 0, None, []
+    saved, latest_ts, all_events, messages = 0, None, [], []
     for label, site_id in SITES.items():
         index_map = build_index_map(io.BytesIO(config_bytes), site_id)
         readings = extract_measurements(io.BytesIO(measured_bytes), site_id)
@@ -174,6 +182,16 @@ def main() -> int:
                   avg_speed_kmh=row["avg_speed_kmh"], timestamp=row["timestamp"])
         saved += 1
         latest_ts = row["timestamp"]
+        messages.append({k: row[k] for k in ("site", "site_id", "timestamp",
+                                             "intensity_veh_per_hr", "avg_speed_kmh")})
+
+    if broker.enabled():
+        try:
+            length = broker.publish(messages)
+            log_event(logging.INFO, "queue_publish_success", queue=broker.QUEUE,
+                      published=len(messages), queue_length=length)
+        except Exception as exc:  # the broker is optional; never fail ingestion because of it
+            log_event(logging.ERROR, "queue_publish_failed", queue=broker.QUEUE, error=str(exc))
 
     if use_db:
         try:

@@ -1,0 +1,36 @@
+# Local Day 2 lab only: two ingestion containers publishing to a shared Redis list.
+# Not used on the VM (see ADR-002 / ADR-004). The cloud database is private, so the
+# lab runs without DB and S3 writes: DB_HOST and S3_BUCKET are blanked below.
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    networks: [airbreda]
+
+  air-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: air-ingest
+    env_file: .env
+    environment:
+      REDIS_HOST: redis
+      DB_HOST: ""
+    depends_on: [redis]
+    networks: [airbreda]
+
+  traffic-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.traffic
+    container_name: traffic-ingest
+    env_file: .env
+    environment:
+      REDIS_HOST: redis
+      DB_HOST: ""
+      S3_BUCKET: ""
+    depends_on: [redis]
+    networks: [airbreda]
+
+networks:
+  airbreda:
