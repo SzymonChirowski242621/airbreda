@@ -52,6 +52,9 @@ CSV_FIELDS = ["site", "site_id", "timestamp", "intensity_veh_per_hr", "avg_speed
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
 log = logging.getLogger("ingest_traffic")
+# boto3/botocore log plain-text INFO lines ("Found credentials ..."); keep stdout pure JSON.
+for noisy in ("boto3", "botocore", "s3transfer", "urllib3"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def log_event(level: int, event: str, **fields) -> None:
