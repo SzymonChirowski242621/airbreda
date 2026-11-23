@@ -49,7 +49,7 @@ Trust boundaries: the database accepts connections only from the VM's security g
 |---|---|
 | [ADR-001](adr/001-data-storage.md) | Initial Data Storage Strategy |
 | [ADR-002](adr/002-messaging.md) | Messaging Architecture |
-| ADR-003 | Resilience Strategy |
+| [ADR-003](adr/003-resilience.md) | Resilience Strategy |
 | [ADR-004](adr/004-compute.md) | Compute Strategy |
 | ADR-005 | Compute & Deployment Strategy |
 | ADR-006 | ML Serving Architecture |
