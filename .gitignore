@@ -1,0 +1,18 @@
+# secrets — never commit
+.env
+*.pem
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# local data dumps
+ndw/
+*.xml
+*.xml.gz
+
+# IDE
+.idea/
+.vscode/
