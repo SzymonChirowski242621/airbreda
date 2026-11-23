@@ -1,0 +1,8 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY reference/__init__.py reference/getTrafficReadings.py reference/
+COPY ingest_traffic.py .
+ENV OUTPUT_DIR=/app/ndw
+CMD ["python", "ingest_traffic.py"]
