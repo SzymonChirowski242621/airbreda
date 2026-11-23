@@ -32,7 +32,7 @@ The SLI is the fraction of probes, one every 5 minutes for each of the four site
 
 **Backup and restore**, inside eu-north-1:
 
-- The database uses RDS automated backups with point-in-time restore. Backup storage up to the size of the database (20 GB) is free.
+- The database uses RDS automated backups with point-in-time restore, kept for 1 day. Seven days was the intended setting, but the AWS Free plan refuses any retention above its free-tier maximum (`FreeTierRestrictionError`), so 1 day is what this account allows. Manual snapshots are allowed and are kept until deleted: one is taken before each risky change (the first, `airbreda-db-day-b-2026-11-23`, before Day C's model work). Backup storage up to the size of the database (20 GB) is free.
 - S3 stores the traffic history. It is replicated across availability zones by default and needs no extra backup at this size.
 - The VM is not backed up. It holds no state: the code is in git, the first-boot script installs Docker, cron, git and the Postgres client, and the only secret is the `.env` file, which is recreated from the password manager. Rebuilding it means launching a new instance with the same script, cloning the repo, copying `.env`, building two images and installing the crontab.
 
@@ -51,7 +51,7 @@ Current monthly cost at eu-north-1 on-demand prices: compute $20.09 (t3.small, d
 
 | Tier | What changes | Extra per month | RTO |
 |---|---|---|---|
-| Backup and restore (chosen) | 7-day RDS backups, rebuild runbook | about $0 | 1 hour |
+| Backup and restore (chosen) | 1-day RDS backups, manual snapshots, rebuild runbook | about $0 | 1 hour |
 | Pilot light | RDS Multi-AZ ($0.037/hour, storage $0.24/GB) and a stopped standby VM in a second AZ (disk and IP only) | about +$20 (+55%) | 10–15 minutes |
 | Warm standby | RDS Multi-AZ, a second running VM in another AZ, an Application Load Balancer ($0.02394/hour) | about +$53 (+146%) | a few minutes |
 | Multi-region active-active | second region | not possible: blocked by the organisation policy | n/a |
@@ -72,4 +72,6 @@ One person must be able to run the rebuild. The runbook has to be written down a
 
 The SLO is defined before there is anything to measure. The probe described above has to exist by Day 4, or the SLO stays on paper.
 
-Two settings still need to be applied to match this decision: RDS backup retention is currently 1 day and should be 7 (still free up to 20 GB), and the rebuild runbook is not written yet.
+The 1-day backup window is acceptable here for two reasons. NO₂ history can be re-fetched from Luchtmeetnet for any period, so an old database backup protects nothing that the source does not already keep. Traffic history lives in S3, not in the database, so RDS backups do not cover it either way. What the short window does not cover is a mistake inside the database, such as a wrong `DELETE`, noticed more than a day later; manual snapshots before risky changes close most of that gap. On a paid account the retention would be 7 days, which is still free up to 20 GB.
+
+The rebuild runbook is not written yet.
