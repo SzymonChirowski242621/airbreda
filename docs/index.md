@@ -4,45 +4,57 @@
 
 ## 1. Architecture diagram
 
-State after Day A (2026-11-23): ingestion only. The dashboard container is added on Day 4.
+The system as deployed on 2026-11-25: two hourly ingestion jobs and a dashboard container on one VM, a private database, and a bucket for traffic history.
 
 ```mermaid
 flowchart LR
-  subgraph internet["Public internet (no auth)"]
-    LMN["RIVM Luchtmeetnet API<br/>NO₂, station NL10240<br/>hourly JSON"]
-    NDW["NDW open data<br/>A27 sites hrl, hrr, vwd, vwa<br/>gzipped DATEX II XML"]
+  subgraph internet["Public internet"]
+    LMN["RIVM Luchtmeetnet API<br/>NO₂, station NL10240"]
+    NDW["NDW open data<br/>A27 sites hrl, hrr, vwd, vwa"]
+    USER["Browser / grader"]
   end
 
   DEV["Developer laptop"]
 
-  subgraph aws["AWS account, region eu-north-1 (only region allowed by org SCP)"]
-    subgraph vpc["Default VPC"]
-      subgraph vmsg["airbreda-vm-sg: inbound SSH 22 from one IP only"]
-        subgraph vm["EC2 t3.small, Amazon Linux 2023"]
-          CRON["cron"]
-          AIR["airbreda-air<br/>container, :15 every hour"]
-          TRF["airbreda-traffic<br/>container, :00 every hour"]
-        end
-      end
-      subgraph dbsg["airbreda-db-sg: inbound 5432 from airbreda-vm-sg only"]
-        RDS[("RDS PostgreSQL 18<br/>db.t3.micro, not public<br/>sensor_readings")]
+  subgraph aws["AWS, eu-north-1 (only region allowed by org policy)"]
+    subgraph vmsg["airbreda-vm-sg: 8000 from anywhere, 22 from one IP"]
+      subgraph vm["EC2 t3.small"]
+        CRON["cron"]
+        AIR["airbreda-air<br/>:15 every hour"]
+        TRF["airbreda-traffic<br/>:00 every hour"]
+        DASH["airbreda-dashboard<br/>FastAPI :8000, always on<br/>model.pkl baked in"]
       end
     end
-    ROLE["IAM role airbreda-ec2-role<br/>via instance profile, IMDSv2"]
+    subgraph dbsg["airbreda-db-sg: 5432 from airbreda-vm-sg only"]
+      RDS[("RDS PostgreSQL 18, not public<br/>sensor_readings<br/>ingestion_status<br/>data_quality_events")]
+    end
+    ROLE["IAM role airbreda-ec2-role<br/>Get/Put on ndw/*, List on ndw/ only"]
     S3[("S3 airbreda-raw-701621783246<br/>public access blocked<br/>ndw/YYYY-MM-DD/HH-site.csv")]
   end
 
-  LMN -- "HTTPS GET, last 50 h" --> AIR
-  NDW -- "HTTP GET, live feed" --> TRF
+  LMN -- "last 50 h" --> AIR
+  NDW -- "live feed" --> TRF
   CRON -. "docker run --rm" .-> AIR
   CRON -. "docker run --rm" .-> TRF
-  AIR -- "INSERT ... ON CONFLICT DO NOTHING<br/>TLS, password from .env" --> RDS
+  AIR -- "upsert readings, flags, status" --> RDS
+  TRF -- "status, bad values" --> RDS
   TRF -- "PutObject" --> S3
+  DASH -- "latest NO₂, health" --> RDS
+  DASH -- "latest CSV per site" --> S3
   ROLE -. "temporary credentials" .-> TRF
+  ROLE -. "temporary credentials" .-> DASH
+  USER -- "HTTP GET /, /site/{id}, /health" --> DASH
   DEV -- "SSH (key pair)" --> vm
 ```
 
-Trust boundaries: the database accepts connections only from the VM's security group, so it is unreachable from the internet and from the laptop. The VM has no AWS access keys; S3 access comes from the instance role. The only secret on the VM is the database password in a `.env` file with mode 600, which is not in git.
+Trust boundaries:
+
+- The database accepts connections only from the VM's security group. It is unreachable from the internet and from the laptop; development access goes through an SSH tunnel via the VM.
+- The VM holds no AWS access keys. S3 access comes from the instance role, which can read and write objects under `ndw/` and list that prefix, and nothing else.
+- The only secret on the VM is the database password, in a `.env` file with mode 600 that is not in git.
+- Port 8000 is public so the dashboard can be graded. The app is read-only and serves only open data.
+
+The model is trained offline (`build_training_data.py` on the VM, then `train_model.py` in the dashboard image) and shipped inside the dashboard image; see ADR-006.
 
 ## 2. Architecture Decision Records
 | ADR | Topic |
@@ -51,8 +63,8 @@ Trust boundaries: the database accepts connections only from the VM's security g
 | [ADR-002](adr/002-messaging.md) | Messaging Architecture |
 | [ADR-003](adr/003-resilience.md) | Resilience Strategy |
 | [ADR-004](adr/004-compute.md) | Compute Strategy |
-| ADR-005 | Compute & Deployment Strategy |
-| ADR-006 | ML Serving Architecture |
+| [ADR-005](adr/005-deployment.md) | Compute & Deployment Strategy |
+| [ADR-006](adr/006-ml-serving.md) | ML Serving Architecture |
 
 Operations: [rebuild runbook](runbook-rebuild.md) (recovery procedure for ADR-003).
 

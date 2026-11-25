@@ -16,3 +16,6 @@ ndw/
 # IDE
 .idea/
 .vscode/
+
+# VM cron logs
+logs/

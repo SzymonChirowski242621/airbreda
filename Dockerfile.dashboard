@@ -1,0 +1,8 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+# model.pkl is baked in: the image that serves the model is the one it was trained with.
+COPY dashboard.py predict.py status.py model.pkl ./
+EXPOSE 8000
+CMD ["uvicorn", "dashboard:app", "--host", "0.0.0.0", "--port", "8000"]
