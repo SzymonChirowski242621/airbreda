@@ -1,28 +1,28 @@
 {
-  "rows": 46,
+  "rows": 93,
   "features": [
     "total_intensity_veh_per_hr",
     "hour_of_day"
   ],
   "holdout": {
-    "train_rows": 34,
-    "test_rows": 12,
-    "test_from": "2026-11-24 21:00:00+00:00",
-    "r2_test": -16.587,
-    "mae_test": 8.82,
-    "mae_test_mean_baseline": 13.02
+    "train_rows": 70,
+    "test_rows": 23,
+    "test_from": "2026-11-26 09:00:00+00:00",
+    "r2_test": -0.675,
+    "mae_test": 6.32,
+    "mae_test_mean_baseline": 4.89
   },
   "final_model": {
-    "r2_train": 0.347,
-    "mae_train": 5.96,
-    "intercept": 15.628,
+    "r2_train": 0.146,
+    "mae_train": 6.84,
+    "intercept": 16.224,
     "coefficients": {
-      "total_intensity_veh_per_hr": 0.00211,
-      "hour_of_day": 0.54108
+      "total_intensity_veh_per_hr": 0.00157,
+      "hour_of_day": 0.27749
     },
-    "correlation_no2_vs_total_intensity": 0.43,
+    "correlation_no2_vs_total_intensity": 0.318,
     "no2_range": [
-      14.28,
+      8.9,
       61.04
     ],
     "intensity_range": [
